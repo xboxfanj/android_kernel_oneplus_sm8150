@@ -1103,26 +1103,8 @@ void switch_usb_state(int usb_state)
 }
 EXPORT_SYMBOL(switch_usb_state);
 
-/*
- *    gesture_enable = 0 : disable gesture
- *    gesture_enable = 1 : enable gesture when ps is far away
- *    gesture_enable = 2 : disable gesture when ps is near
- */
-static ssize_t proc_gesture_control_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
-{
-    int value = 0;
-    char buf[4] = {0};
-    struct touchpanel_data *ts = PDE_DATA(file_inode(file));
-
-    if (count > 2)
-        return count;
-    if (!ts)
-        return count;
-
-    if (copy_from_user(buf, buffer, count)) {
-        TPD_INFO("%s: read proc input error.\n", __func__);
-        return count;
-    }
+static void proc_gesture_control_enable(struct touchpanel_data *ts, char *buf) {
+        int value = 0;
 	TPD_DEBUG("%s write argc1[0x%x],argc2[0x%x]\n",__func__,buf[0],buf[1]);
 	UpVee_enable = (buf[0] & BIT0)?1:0;
 	DouSwip_enable = (buf[0] & BIT1)?1:0;
@@ -1157,6 +1139,51 @@ static ssize_t proc_gesture_control_write(struct file *file, const char __user *
         TPD_INFO("%s: do not do same operator :%d\n", __func__, value);
     }
     mutex_unlock(&ts->mutex);
+}
+
+/*
+ *    gesture_enable = 0 : disable gesture
+ *    gesture_enable = 1 : enable gesture when ps is far away
+ *    gesture_enable = 2 : disable gesture when ps is near
+ */
+static ssize_t proc_gesture_control_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppos)
+{
+    char buf[4] = {0};
+    struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+
+    if (count > 2)
+        return count;
+    if (!ts)
+        return count;
+
+    if (copy_from_user(buf, buffer, count)) {
+        TPD_INFO("%s: read proc input error.\n", __func__);
+        return count;
+    }
+
+    proc_gesture_control_enable(ts, buf);
+
+    return count;
+}
+
+static ssize_t proc_gesture_dt2w_write(struct file *file, const char __user *buffer, size_t count, loff_t *ppops)
+{
+    char buf = '\0';
+    struct touchpanel_data *ts = PDE_DATA(file_inode(file));
+    if (count == 0 || count >= 2)
+        return count;
+    if (!ts)
+        return count;
+
+    if (copy_from_user(&buf, buffer, count)) {
+        TPD_INFO("%s: read proc input error.\n", __func__);
+        return count;
+    }
+
+    char buf_enable[2] = { 0, 0 };
+    if (buf == '1')
+        buf_enable[0] = 0x80;
+    proc_gesture_control_enable(ts, buf_enable);
 
     return count;
 }
@@ -1199,6 +1226,13 @@ static ssize_t proc_coordinate_read(struct file *file, char __user *user_buf, si
 
 static const struct file_operations proc_gesture_control_fops = {
     .write = proc_gesture_control_write,
+    .read  = proc_gesture_control_read,
+    .open  = simple_open,
+    .owner = THIS_MODULE,
+};
+
+static const struct file_operations proc_gesture_dt2w_fops = {
+    .write = proc_gesture_dt2w_write,
     .read  = proc_gesture_control_read,
     .open  = simple_open,
     .owner = THIS_MODULE,
@@ -2350,6 +2384,11 @@ static int init_touchpanel_proc(struct touchpanel_data *ts)
     //proc files-step2-4:/proc/touchpanel/double_tap_enable (black gesture related interface)
     if (ts->black_gesture_support) {
         prEntry_tmp = proc_create_data("gesture_enable", 0666, prEntry_tp, &proc_gesture_control_fops, ts);
+        if (prEntry_tmp == NULL) {
+            ret = -ENOMEM;
+            TPD_INFO("%s: Couldn't create proc entry, %d\n", __func__, __LINE__);
+        }
+        prEntry_tmp = proc_create_data("gesture_dt2w", 0666, prEntry_tp, &proc_gesture_dt2w_fops, ts);
         if (prEntry_tmp == NULL) {
             ret = -ENOMEM;
             TPD_INFO("%s: Couldn't create proc entry, %d\n", __func__, __LINE__);
